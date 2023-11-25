@@ -8,6 +8,7 @@ resource "aws_lambda_function" "line-gpt-rag-function" {
   environment {
     variables = {
       OPENAI_API_KEY = var.openai_api_key
+      LINE_ACCESS_TOKEN = var.line_access_token
     }
   }
 }
@@ -23,6 +24,25 @@ output "lambda_function_url" {
 
 resource "aws_iam_role" "lambda_exec" {
   name = "lambda_exec_role"
+
+  inline_policy {
+    name = "lambda_exec_policy"
+
+    policy = jsonencode({
+      Version = "2012-10-17",
+      Statement = [
+        {
+          Action = [
+            "logs:CreateLogGroup",
+            "logs:CreateLogStream",
+            "logs:PutLogEvents",
+          ],
+          Effect   = "Allow",
+          Resource = "*",
+        },
+      ],
+    })
+  }
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
@@ -59,4 +79,9 @@ resource "aws_iam_role" "lambda_logs" {
 variable "openai_api_key" {
   description = "OpenAI API Key"
   type        = string
+}
+
+variable "line_access_token" {
+    description = "LINE Access Token"
+    type        = string
 }
