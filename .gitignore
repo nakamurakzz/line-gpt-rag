@@ -1,3 +1,12 @@
+main
+main.zip
+
+.terraform
+terraform.tfstate
+terraform.tfvars
+deployment.zip
+terraform.tfstate.backup
+
 # If you prefer the allow list template instead of the deny list, see community template:
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
 #
