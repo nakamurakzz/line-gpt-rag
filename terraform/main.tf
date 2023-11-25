@@ -4,6 +4,7 @@ resource "aws_lambda_function" "line-gpt-rag-function" {
   handler       = "main"
   runtime       = "go1.x"
   filename      = "../main.zip"
+  timeout       = 60
 
   environment {
     variables = {

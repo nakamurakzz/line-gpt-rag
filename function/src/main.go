@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"os"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aws/aws-lambda-go/lambda"
+	openai "github.com/sashabaranov/go-openai"
 )
 
 type Event struct {
@@ -54,6 +56,14 @@ type Response struct {
 	Body       string `json:"body"`
 }
 
+type ResponseBody struct {
+	ReplyToken string `json:"replyToken"`
+	Messages   []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"messages"`
+}
+
 func HandleRequest(ctx context.Context, event Event) (Response, error) {
 	log.Printf("event: %v", event)
 
@@ -62,8 +72,6 @@ func HandleRequest(ctx context.Context, event Event) (Response, error) {
 	if err != nil {
 		return Response{StatusCode: 400, Body: `{"msg": "error ready body, Invalid JSON"}`}, err
 	}
-
-	log.Printf("request: %v", body)
 
 	if len(body.Events) == 0 {
 		return Response{StatusCode: 200, Body: `{"message": "success"}`}, nil
@@ -83,17 +91,61 @@ func HandleRequest(ctx context.Context, event Event) (Response, error) {
 			StatusCode: 500,
 		}, fmt.Errorf("LINE_ACCESS_TOKEN is not set")
 	}
-	log.Printf("OPENAI_API_KEY: %v, LINE_ACCESS_TOKEN: %v", openaiApiKey[:3], lineAccessToken[:3])
 
-	rBody := []byte(fmt.Sprintf(`{
-		"replyToken": "%s",
-		"messages": [
-			{
-				"type": "text",
-				"text": "%s"
-			}
-		]
-	}`, body.Events[0].ReplyToken, "Hello, World!"))
+	// call openai api
+	openAiClient := openai.NewClient(openaiApiKey)
+	openaiResp, err := openAiClient.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: openai.GPT4,
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: "if your answer will be over 1500 characters, it must be submitted in multiple messages." + body.Events[0].Message.Text,
+				},
+			},
+		},
+	)
+	if err != nil {
+		log.Printf("failed to call openai api: %v", err)
+		return Response{
+			StatusCode: 500,
+			Body:       `{"msg": "failed to call openai api"}`,
+		}, fmt.Errorf("failed to call openai api: %v", err)
+	}
+	c := openaiResp.Choices[0].Message.Content
+
+	var messages []string
+	// message は 300文字ずつに分割する
+	l := utf8.RuneCountInString(c)
+	for i := 0; i < l; i += 300 {
+		end := i + 300
+		if end > l {
+			end = l
+		}
+		messages = append(messages, c[i:end])
+	}
+
+	var rb ResponseBody
+	rb.ReplyToken = body.Events[0].ReplyToken
+	for _, m := range messages {
+		rb.Messages = append(rb.Messages, struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}{
+			Type: "text",
+			Text: m,
+		})
+	}
+
+	rBody, err := json.Marshal(rb)
+	if err != nil {
+		log.Printf("failed to marshal response body: %v", err)
+		return Response{
+			StatusCode: 500,
+			Body:       `{"msg": "failed to marshal response body"}`,
+		}, fmt.Errorf("failed to marshal response body: %v", err)
+	}
 	b := bytes.NewBuffer(rBody)
 
 	req, err := http.NewRequest("POST", "https://api.line.me/v2/bot/message/reply", b)
